@@ -3,6 +3,8 @@
 *.weights
 *.h5
 logs/
+data/
+annos/
 *_test.py
 
 # Byte-compiled / optimized / DLL files

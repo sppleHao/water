@@ -5,11 +5,12 @@ from functools import wraps
 import numpy as np
 import tensorflow as tf
 from keras import backend as K
-from keras.layers import Conv2D, Add, ZeroPadding2D, UpSampling2D, Concatenate, MaxPooling2D
+from keras.layers import Conv2D, Add, ZeroPadding2D, UpSampling2D, Concatenate, MaxPooling2D, Flatten ,Dense,GlobalAveragePooling2D,Dropout
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.normalization import BatchNormalization
 from keras.models import Model
 from keras.regularizers import l2
+from keras.applications.resnet50 import ResNet50
 
 from yolo3.utils import compose
 
@@ -66,6 +67,59 @@ def make_last_layers(x, num_filters, out_filters):
             DarknetConv2D(out_filters, (1,1)))(x)
     return x, y
 
+def classification_body(num_classes):
+    input_shape = (224,224,3)
+
+    res = ResNet50(weights='imagenet',include_top=False,input_shape=input_shape)
+    
+    x = res.output
+    x = Flatten()(x)
+    out =  Dense(num_classes,activation='softmax',name='fc360')(x)
+
+    return Model(res.input,out)
+
+def regression_body_resnet():
+    input_shape = (224,224,3)
+
+    res = ResNet50(weights='imagenet',include_top=False,input_shape=input_shape)
+    
+    x = compose(
+        Flatten(),
+        Dropout(0.2),
+        Dense(256,activation='sigmoid')
+        )(res.output)
+
+    out1 = compose(
+        Dropout(0.2),
+        Dense(1)
+        )(x)
+    out2 = compose(
+        Dropout(0.2),
+        Dense(1)
+        )(x)
+
+    return Model(res.input,[out1,out2])
+
+def regression_body(inputs):
+    """ Create Angle Regression model By Darkent in Keras """
+    darknet = Model(inputs,darknet_body(inputs))
+
+    x = compose(
+        Flatten(),
+        Dropout(0.2),
+        Dense(256,activation='sigmoid')
+        )(darknet.output)
+
+    out1 = compose(
+        Dropout(0.2),
+        Dense(1)
+        )(x)
+    out2 = compose(
+        Dropout(0.2),
+        Dense(1)
+        )(x)
+
+    return Model(inputs,[out1,out2])
 
 def yolo_body(inputs, num_anchors, num_classes):
     """Create YOLO_V3 model CNN body in Keras."""
@@ -378,7 +432,7 @@ def yolo_loss(args, anchors, num_classes, ignore_thresh=.5, print_loss=False):
 
         # Darknet raw box to calculate loss.
         raw_true_xy = y_true[l][..., :2]*grid_shapes[l][::-1] - grid
-        raw_true_wh = K.log(y_true[l][..., 2:4] / anchors[anchor_mask[l]] * input_shape[::-1])
+        raw_true_wh = K.log(y_true[l][..., 2:4] / anchors[anchor_mask[l]] * input_shape[::-1]+ 1e-10)
         raw_true_wh = K.switch(object_mask, raw_true_wh, K.zeros_like(raw_true_wh)) # avoid log(0)=-inf
         box_loss_scale = 2 - y_true[l][...,2:3]*y_true[l][...,3:4]
 
